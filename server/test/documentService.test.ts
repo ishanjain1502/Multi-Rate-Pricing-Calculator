@@ -1,7 +1,17 @@
 // test/documentService.test.ts (part 1: create/list/get)
 import { describe, expect, it } from "vitest";
-import { createDocument, listDocuments, getDocument, addLine, updateLine, deleteLine } from "../src/services/documentService.js";
-import { NotFoundError } from "../src/errors/HttpError.js";
+import {
+  createDocument,
+  listDocuments,
+  getDocument,
+  addLine,
+  updateLine,
+  deleteLine,
+  updateDocument,
+  deleteDocument,
+  finalizeDocument,
+} from "../src/services/documentService.js";
+import { NotFoundError, ConflictError } from "../src/errors/HttpError.js";
 
 // Valid ObjectId hex strings (Document.userId is Schema.Types.ObjectId)
 const U1 = "507f1f77bcf86cd799439011";
@@ -98,5 +108,70 @@ describe("documentService line mutations", () => {
     await expect(
       addLine(U_STRANGER, doc.id, { description: "x", quantity: 1, unitPrice: 1000, taxPercent: 0 }),
     ).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+const U_P = "507f1f77bcf86cd79943901d";
+const U_P2 = "507f1f77bcf86cd79943901e";
+const U_DEL = "507f1f77bcf86cd79943901f";
+const U_DEL2 = "507f1f77bcf86cd799439020";
+const U_F2 = "507f1f77bcf86cd799439021";
+const U_F3 = "507f1f77bcf86cd799439022";
+const U_F4 = "507f1f77bcf86cd799439023";
+const U_F5_OWNER = "507f1f77bcf86cd799439024";
+const U_F5_STRANGER = "507f1f77bcf86cd799439025";
+
+describe("documentService lifecycle", () => {
+  it("patches a draft document", async () => {
+    const doc = await createDocument(U_P, { title: "P", issueDate: new Date("2026-01-01"), currency: "usd" });
+    const updated = await updateDocument(U_P, doc.id, { title: "P2" });
+    expect(updated.title).toBe("P2");
+  });
+
+  it("rejects patch on finalized with 409", async () => {
+    const doc = await createDocument(U_P2, { title: "P2", issueDate: new Date("2026-01-01"), currency: "usd" });
+    await finalizeDocument(U_P2, doc.id);
+    await expect(updateDocument(U_P2, doc.id, { title: "X" })).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it("deletes a draft and its lines", async () => {
+    const doc = await createDocument(U_DEL, { title: "D", issueDate: new Date("2026-01-01"), currency: "usd" });
+    await addLine(U_DEL, doc.id, { description: "L", quantity: 1, unitPrice: 1000, taxPercent: 0 });
+    await deleteDocument(U_DEL, doc.id);
+    await expect(getDocument(U_DEL, doc.id)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("rejects delete on finalized with 409", async () => {
+    const doc = await createDocument(U_DEL2, { title: "D2", issueDate: new Date("2026-01-01"), currency: "usd" });
+    await finalizeDocument(U_DEL2, doc.id);
+    await expect(deleteDocument(U_DEL2, doc.id)).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it("finalizes a draft, persists totals, sets status", async () => {
+    const doc = await createDocument(U_F2, { title: "F2", issueDate: new Date("2026-01-01"), currency: "usd" });
+    await addLine(U_F2, doc.id, { description: "L", quantity: 2, unitPrice: 10000, discounts: [{ type: "percent", value: 10 }], taxPercent: 5 });
+    const finalized = await finalizeDocument(U_F2, doc.id);
+    expect(finalized.status).toBe("finalized");
+    expect(finalized.subtotal).toBe(20000);
+    expect(finalized.grandTotal).toBe(18900);
+  });
+
+  it("rejects finalize on finalized with 409", async () => {
+    const doc = await createDocument(U_F3, { title: "F3", issueDate: new Date("2026-01-01"), currency: "usd" });
+    await finalizeDocument(U_F3, doc.id);
+    await expect(finalizeDocument(U_F3, doc.id)).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it("rejects adding a line to a finalized doc with 409", async () => {
+    const doc = await createDocument(U_F4, { title: "F4", issueDate: new Date("2026-01-01"), currency: "usd" });
+    await finalizeDocument(U_F4, doc.id);
+    await expect(
+      addLine(U_F4, doc.id, { description: "L", quantity: 1, unitPrice: 1000, taxPercent: 0 }),
+    ).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it("rejects finalize on another user's doc with 404", async () => {
+    const doc = await createDocument(U_F5_OWNER, { title: "F5", issueDate: new Date("2026-01-01"), currency: "usd" });
+    await expect(finalizeDocument(U_F5_STRANGER, doc.id)).rejects.toBeInstanceOf(NotFoundError);
   });
 });

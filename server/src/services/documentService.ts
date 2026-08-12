@@ -241,3 +241,45 @@ export async function deleteLine(userId: string, documentId: string, lineId: str
     await doc.save({ session });
   });
 }
+
+type UpdateDocumentInput = {
+  title?: string;
+  customer?: string;
+  issueDate?: Date;
+  currency?: string;
+};
+
+export async function updateDocument(userId: string, documentId: string, input: UpdateDocumentInput): Promise<DocumentDTO> {
+  const doc = await loadOwnedDocument(documentId, userId);
+  assertDraft(doc);
+
+  if (input.title !== undefined) doc.title = input.title;
+  if (input.customer !== undefined) doc.customer = input.customer;
+  if (input.issueDate !== undefined) doc.issueDate = input.issueDate;
+  if (input.currency !== undefined) doc.currency = input.currency;
+  await doc.save();
+
+  return documentToDTO(doc);
+}
+
+export async function deleteDocument(userId: string, documentId: string): Promise<void> {
+  await mongoose.connection.transaction(async (session) => {
+    const doc = await loadOwnedDocument(documentId, userId);
+    assertDraft(doc);
+    await LineItem.deleteMany({ documentId: doc._id }).session(session);
+    await Document.deleteOne({ _id: doc._id }).session(session);
+  });
+}
+
+export async function finalizeDocument(userId: string, documentId: string): Promise<DocumentDTO> {
+  return mongoose.connection.transaction(async (session) => {
+    const doc = await loadOwnedDocument(documentId, userId);
+    assertDraft(doc);
+
+    await recomputeTotals(doc, session);
+    doc.status = "finalized";
+    await doc.save({ session });
+
+    return documentToDTO(doc);
+  });
+}
