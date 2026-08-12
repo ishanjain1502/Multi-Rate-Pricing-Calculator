@@ -1,13 +1,11 @@
 import { z } from "zod";
 
-export const discountSchema = z
-  .array(
-    z.object({
-      type: z.enum(["percent", "fixed"]),
-      value: z.number().min(0),
-    }),
-  )
-  .max(1);
+const discountItemSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("percent"), value: z.number().min(0) }),
+  z.object({ type: z.literal("fixed"), value: z.number().int().min(0) }),
+]);
+
+export const discountSchema = z.array(discountItemSchema).max(1);
 
 export const createLineSchema = z.object({
   description: z.string().min(1).max(500),

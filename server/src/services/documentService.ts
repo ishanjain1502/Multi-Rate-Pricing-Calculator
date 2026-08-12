@@ -1,8 +1,11 @@
 // src/services/documentService.ts
-import mongoose, { type ClientSession } from "mongoose";
+import mongoose, { type ClientSession, type HydratedDocument } from "mongoose";
 import { Document, LineItem, type IDocument, type ILineItem } from "../models/index.js";
 import { calculateDocument, calculateLineItem, type LineItemInput } from "../calculations/index.js";
 import { NotFoundError, ConflictError } from "../errors/HttpError.js";
+
+type DocumentDoc = HydratedDocument<IDocument>;
+type LineItemDoc = HydratedDocument<ILineItem>;
 
 export type LineDTO = {
   id: string;
@@ -35,14 +38,9 @@ export type DocumentDTO = {
   updatedAt: string;
 };
 
-export type DocumentSummaryDTO = Omit<DocumentDTO, "customer" | "issueDate"> & {
-  customer: string;
-  issueDate: string;
-};
-
 export type DocumentWithLinesDTO = DocumentDTO & { lines: LineDTO[] };
 
-export function lineToDTO(line: ILineItem): LineDTO {
+export function lineToDTO(line: LineItemDoc): LineDTO {
   return {
     id: line._id.toString(),
     description: line.description,
@@ -60,7 +58,7 @@ export function lineToDTO(line: ILineItem): LineDTO {
   };
 }
 
-export function documentToDTO(doc: IDocument): DocumentDTO {
+export function documentToDTO(doc: DocumentDoc): DocumentDTO {
   return {
     id: doc._id.toString(),
     title: doc.title,
@@ -77,29 +75,46 @@ export function documentToDTO(doc: IDocument): DocumentDTO {
   };
 }
 
-export function toLineItemInput(line: ILineItem): LineItemInput {
+function lineFieldsToLineItemInput(fields: {
+  quantity: number;
+  unitPrice: number;
+  taxPercent: number;
+  discounts?: { type: "percent" | "fixed"; value: number }[];
+}): LineItemInput {
   return {
-    quantity: line.quantity,
-    unitPrice: line.unitPrice,
-    discount: line.discounts[0] ? { type: line.discounts[0].type, value: line.discounts[0].value } : undefined,
-    taxPercent: line.taxPercent,
+    quantity: fields.quantity,
+    unitPrice: fields.unitPrice,
+    discount: fields.discounts?.[0]
+      ? { type: fields.discounts[0].type, value: fields.discounts[0].value }
+      : undefined,
+    taxPercent: fields.taxPercent,
   };
 }
 
-export async function loadOwnedDocument(documentId: string, userId: string): Promise<IDocument> {
-  const doc = await Document.findOne({ _id: documentId, userId });
+export function toLineItemInput(line: LineItemDoc): LineItemInput {
+  return lineFieldsToLineItemInput(line);
+}
+
+export async function loadOwnedDocument(
+  documentId: string,
+  userId: string,
+  session?: ClientSession,
+): Promise<DocumentDoc> {
+  const doc = await Document.findOne({ _id: documentId, userId }).session(session ?? null);
   if (!doc) throw new NotFoundError("Document not found");
   return doc;
 }
 
-export function assertDraft(doc: IDocument): void {
+export function assertDraft(doc: DocumentDoc): void {
   if (doc.status !== "draft") {
     throw new ConflictError("Finalized documents cannot be modified");
   }
 }
 
-export async function recomputeTotals(doc: IDocument, session?: ClientSession): Promise<void> {
-  const lines = await LineItem.find({ documentId: doc._id }).sort({ createdAt: 1 }).session(session);
+export async function recomputeTotals(doc: DocumentDoc, session?: ClientSession): Promise<void> {
+  const lines = await LineItem.find({ documentId: doc._id })
+    .sort({ createdAt: 1 })
+    .session(session ?? null);
   const totals = calculateDocument(lines.map(toLineItemInput));
   doc.subtotal = totals.subtotal;
   doc.totalDiscount = totals.totalDiscount;
@@ -129,7 +144,7 @@ export async function createDocument(
 export async function listDocuments(
   userId: string,
   filter?: { status?: "draft" | "finalized" },
-): Promise<DocumentSummaryDTO[]> {
+): Promise<DocumentDTO[]> {
   const query: Record<string, unknown> = { userId };
   if (filter?.status) query.status = filter.status;
   const docs = await Document.find(query).sort({ createdAt: -1 });
@@ -152,22 +167,12 @@ type CreateLineInput = {
 
 type UpdateLineInput = Partial<CreateLineInput>;
 
-function calcLineTotals(input: LineItemInput) {
-  return calculateLineItem(input);
-}
-
 export async function addLine(userId: string, documentId: string, input: CreateLineInput): Promise<LineDTO> {
   return mongoose.connection.transaction(async (session) => {
-    const doc = await loadOwnedDocument(documentId, userId);
+    const doc = await loadOwnedDocument(documentId, userId, session);
     assertDraft(doc);
 
-    const lineInput: LineItemInput = {
-      quantity: input.quantity,
-      unitPrice: input.unitPrice,
-      discount: input.discounts?.[0] ? { type: input.discounts[0].type, value: input.discounts[0].value } : undefined,
-      taxPercent: input.taxPercent,
-    };
-    const calc = calcLineTotals(lineInput);
+    const calc = calculateLineItem(lineFieldsToLineItemInput(input));
 
     const line = await LineItem.create(
       [
@@ -202,7 +207,7 @@ export async function updateLine(
   input: UpdateLineInput,
 ): Promise<LineDTO> {
   return mongoose.connection.transaction(async (session) => {
-    const doc = await loadOwnedDocument(documentId, userId);
+    const doc = await loadOwnedDocument(documentId, userId, session);
     assertDraft(doc);
 
     const line = await LineItem.findOne({ _id: lineId, documentId: doc._id }).session(session);
@@ -212,9 +217,9 @@ export async function updateLine(
     if (input.quantity !== undefined) line.quantity = input.quantity;
     if (input.unitPrice !== undefined) line.unitPrice = input.unitPrice;
     if (input.taxPercent !== undefined) line.taxPercent = input.taxPercent;
-    if (input.discounts !== undefined) line.discounts = input.discounts;
+    if (input.discounts !== undefined) line.set("discounts", input.discounts);
 
-    const calc = calcLineTotals(toLineItemInput(line));
+    const calc = calculateLineItem(toLineItemInput(line));
     line.subtotal = calc.subtotal;
     line.discountAmount = calc.discountAmount;
     line.discountedAmount = calc.discountedAmount;
@@ -231,7 +236,7 @@ export async function updateLine(
 
 export async function deleteLine(userId: string, documentId: string, lineId: string): Promise<void> {
   await mongoose.connection.transaction(async (session) => {
-    const doc = await loadOwnedDocument(documentId, userId);
+    const doc = await loadOwnedDocument(documentId, userId, session);
     assertDraft(doc);
 
     const res = await LineItem.deleteOne({ _id: lineId, documentId: doc._id }).session(session);
@@ -264,7 +269,7 @@ export async function updateDocument(userId: string, documentId: string, input: 
 
 export async function deleteDocument(userId: string, documentId: string): Promise<void> {
   await mongoose.connection.transaction(async (session) => {
-    const doc = await loadOwnedDocument(documentId, userId);
+    const doc = await loadOwnedDocument(documentId, userId, session);
     assertDraft(doc);
     await LineItem.deleteMany({ documentId: doc._id }).session(session);
     await Document.deleteOne({ _id: doc._id }).session(session);
@@ -273,7 +278,7 @@ export async function deleteDocument(userId: string, documentId: string): Promis
 
 export async function finalizeDocument(userId: string, documentId: string): Promise<DocumentDTO> {
   return mongoose.connection.transaction(async (session) => {
-    const doc = await loadOwnedDocument(documentId, userId);
+    const doc = await loadOwnedDocument(documentId, userId, session);
     assertDraft(doc);
 
     await recomputeTotals(doc, session);

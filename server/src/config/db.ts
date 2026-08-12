@@ -8,6 +8,14 @@ export async function connectDB(): Promise<void> {
 
   try {
     await mongoose.connect(env.mongoUri);
+
+    const hello = await mongoose.connection.db!.admin().command({ hello: 1 });
+    if (!hello.setName) {
+      console.warn(
+        "WARNING: MongoDB is not a replica set. Transactions (line mutations, document delete, finalize) require a replica set URI. See .env.example.",
+      );
+    }
+
     console.log("MongoDB connected");
   } catch (error) {
     console.error("MongoDB connection error:", error);

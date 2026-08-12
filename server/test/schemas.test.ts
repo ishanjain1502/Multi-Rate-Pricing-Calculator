@@ -42,6 +42,21 @@ describe("schemas", () => {
     ).toBe(false);
   });
 
+  it("createLine rejects fractional fixed discount cents", () => {
+    expect(
+      createLineSchema.safeParse({
+        description: "x", quantity: 1, unitPrice: 1000, taxPercent: 5,
+        discounts: [{ type: "fixed", value: 10.5 }],
+      }).success,
+    ).toBe(false);
+    expect(
+      createLineSchema.safeParse({
+        description: "x", quantity: 1, unitPrice: 1000, taxPercent: 5,
+        discounts: [{ type: "fixed", value: 2000 }],
+      }).success,
+    ).toBe(true);
+  });
+
   it("loginSchema mirrors signup shape", () => {
     expect(loginSchema.safeParse({ email: "a@b.com", password: "12345678" }).success).toBe(true);
   });

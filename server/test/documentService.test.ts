@@ -1,5 +1,5 @@
 // test/documentService.test.ts (part 1: create/list/get)
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createDocument,
   listDocuments,
@@ -11,6 +11,7 @@ import {
   deleteDocument,
   finalizeDocument,
 } from "../src/services/documentService.js";
+import { LineItem } from "../src/models/index.js";
 import { NotFoundError, ConflictError } from "../src/errors/HttpError.js";
 
 // Valid ObjectId hex strings (Document.userId is Schema.Types.ObjectId)
@@ -108,6 +109,31 @@ describe("documentService line mutations", () => {
     await expect(
       addLine(U_STRANGER, doc.id, { description: "x", quantity: 1, unitPrice: 1000, taxPercent: 0 }),
     ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("rolls back document totals when a line save fails", async () => {
+    const U_ROLLBACK = "507f1f77bcf86cd799439026";
+    const doc = await createDocument(U_ROLLBACK, { title: "R", issueDate: new Date("2026-01-01"), currency: "usd" });
+    await addLine(U_ROLLBACK, doc.id, { description: "L1", quantity: 1, unitPrice: 10000, taxPercent: 0 });
+
+    const before = await getDocument(U_ROLLBACK, doc.id);
+    expect(before.subtotal).toBe(10000);
+    expect(before.lines).toHaveLength(1);
+
+    const originalCreate = LineItem.create.bind(LineItem);
+    LineItem.create = vi.fn(async () => {
+      throw new Error("Simulated line save failure");
+    }) as typeof LineItem.create;
+
+    await expect(
+      addLine(U_ROLLBACK, doc.id, { description: "L2", quantity: 1, unitPrice: 5000, taxPercent: 0 }),
+    ).rejects.toThrow("Simulated line save failure");
+
+    LineItem.create = originalCreate;
+
+    const after = await getDocument(U_ROLLBACK, doc.id);
+    expect(after.subtotal).toBe(10000);
+    expect(after.lines).toHaveLength(1);
   });
 });
 

@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import type { ZodType } from "zod";
+import { ZodError, type ZodType } from "zod";
 import { ValidationError } from "../errors/HttpError.js";
 
 type Opts = { body?: ZodType; params?: ZodType; query?: ZodType };
@@ -11,11 +11,15 @@ export function validate(opts: Opts) {
       if (opts.params) (req as any).params = opts.params.parse(req.params);
       if (opts.query) (req as any).query = opts.query.parse(req.query);
       next();
-    } catch (err: any) {
-      const message =
-        err?.issues?.map((i: any) => `${i.path.join(".")}: ${i.message}`).join("; ") ??
-        "Validation failed";
-      next(new ValidationError(message));
+    } catch (err) {
+      if (err instanceof ZodError) {
+        const message = err.issues
+          .map((i) => `${i.path.join(".")}: ${i.message}`)
+          .join("; ");
+        next(new ValidationError(message));
+        return;
+      }
+      next(err);
     }
   };
 }
