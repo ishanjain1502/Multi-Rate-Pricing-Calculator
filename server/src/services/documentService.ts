@@ -1,5 +1,5 @@
 // src/services/documentService.ts
-import type { ClientSession } from "mongoose";
+import mongoose, { type ClientSession } from "mongoose";
 import { Document, LineItem, type IDocument, type ILineItem } from "../models/index.js";
 import { calculateDocument, calculateLineItem, type LineItemInput } from "../calculations/index.js";
 import { NotFoundError, ConflictError } from "../errors/HttpError.js";
@@ -140,4 +140,104 @@ export async function getDocument(userId: string, documentId: string): Promise<D
   const doc = await loadOwnedDocument(documentId, userId);
   const lines = await LineItem.find({ documentId: doc._id }).sort({ createdAt: 1 });
   return { ...documentToDTO(doc), lines: lines.map(lineToDTO) };
+}
+
+type CreateLineInput = {
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  discounts?: { type: "percent" | "fixed"; value: number }[];
+  taxPercent: number;
+};
+
+type UpdateLineInput = Partial<CreateLineInput>;
+
+function calcLineTotals(input: LineItemInput) {
+  return calculateLineItem(input);
+}
+
+export async function addLine(userId: string, documentId: string, input: CreateLineInput): Promise<LineDTO> {
+  return mongoose.connection.transaction(async (session) => {
+    const doc = await loadOwnedDocument(documentId, userId);
+    assertDraft(doc);
+
+    const lineInput: LineItemInput = {
+      quantity: input.quantity,
+      unitPrice: input.unitPrice,
+      discount: input.discounts?.[0] ? { type: input.discounts[0].type, value: input.discounts[0].value } : undefined,
+      taxPercent: input.taxPercent,
+    };
+    const calc = calcLineTotals(lineInput);
+
+    const line = await LineItem.create(
+      [
+        {
+          documentId: doc._id,
+          description: input.description,
+          quantity: input.quantity,
+          unitPrice: input.unitPrice,
+          discounts: input.discounts ?? [],
+          taxPercent: input.taxPercent,
+          subtotal: calc.subtotal,
+          discountAmount: calc.discountAmount,
+          discountedAmount: calc.discountedAmount,
+          taxAmount: calc.taxAmount,
+          total: calc.total,
+        },
+      ],
+      { session },
+    );
+
+    await recomputeTotals(doc, session);
+    await doc.save({ session });
+
+    return lineToDTO(line[0]);
+  });
+}
+
+export async function updateLine(
+  userId: string,
+  documentId: string,
+  lineId: string,
+  input: UpdateLineInput,
+): Promise<LineDTO> {
+  return mongoose.connection.transaction(async (session) => {
+    const doc = await loadOwnedDocument(documentId, userId);
+    assertDraft(doc);
+
+    const line = await LineItem.findOne({ _id: lineId, documentId: doc._id }).session(session);
+    if (!line) throw new NotFoundError("Line item not found");
+
+    if (input.description !== undefined) line.description = input.description;
+    if (input.quantity !== undefined) line.quantity = input.quantity;
+    if (input.unitPrice !== undefined) line.unitPrice = input.unitPrice;
+    if (input.taxPercent !== undefined) line.taxPercent = input.taxPercent;
+    if (input.discounts !== undefined) line.discounts = input.discounts;
+
+    const calc = calcLineTotals(toLineItemInput(line));
+    line.subtotal = calc.subtotal;
+    line.discountAmount = calc.discountAmount;
+    line.discountedAmount = calc.discountedAmount;
+    line.taxAmount = calc.taxAmount;
+    line.total = calc.total;
+    await line.save({ session });
+
+    await recomputeTotals(doc, session);
+    await doc.save({ session });
+
+    return lineToDTO(line);
+  });
+}
+
+export async function deleteLine(userId: string, documentId: string, lineId: string): Promise<void> {
+  await mongoose.connection.transaction(async (session) => {
+    const doc = await loadOwnedDocument(documentId, userId);
+    assertDraft(doc);
+
+    const res = await LineItem.deleteOne({ _id: lineId, documentId: doc._id }).session(session);
+    if (res.deletedCount === 0) throw new NotFoundError("Line item not found");
+
+    await recomputeTotals(doc, session);
+    await doc.save({ session });
+  });
 }
