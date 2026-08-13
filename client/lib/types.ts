@@ -65,3 +65,38 @@ export class ApiError extends Error {
     this.name = "ApiError";
   }
 }
+
+export type ReportSetup = {
+  from: string;
+  to: string;
+  targetCurrency: string;
+  currencies: string[];
+  defaultRates: Record<string, number>;
+};
+
+export type SummaryReport = {
+  from: string;
+  to: string;
+  targetCurrency: string;
+  documentCount: number;
+  grandTotal: number;
+  totalTax: number;
+  totalDiscount: number;
+  breakdown: Array<{
+    currency: string;
+    documentCount: number;
+    grandTotal: number;
+    totalTax: number;
+    totalDiscount: number;
+    convertedGrandTotal: number;
+    convertedTotalTax: number;
+    convertedTotalDiscount: number;
+  }>;
+};
+
+export type SummaryReportBody = {
+  from: string;
+  to: string;
+  targetCurrency: string;
+  rates: Record<string, number>;
+};

@@ -8,6 +8,9 @@ import {
   type LineItem,
   type UpdateDocumentBody,
   type User,
+  type ReportSetup,
+  type SummaryReport,
+  type SummaryReportBody,
 } from "./types";
 
 const BASE_URL = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/api`;
@@ -80,3 +83,11 @@ export const updateLine = (docId: string, lineId: string, body: Partial<LineBody
 
 export const deleteLine = (docId: string, lineId: string) =>
   apiFetch<undefined>(`/documents/${docId}/lines/${lineId}`, { method: "DELETE" });
+
+export const getReportSetup = (from: string, to: string, targetCurrency: string) =>
+  apiFetch<ReportSetup>(
+    `/reports/setup?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&targetCurrency=${encodeURIComponent(targetCurrency)}`,
+  );
+
+export const postSummaryReport = (body: SummaryReportBody) =>
+  apiFetch<SummaryReport>("/reports/summary", { method: "POST", body });

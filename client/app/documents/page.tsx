@@ -36,6 +36,12 @@ function DocumentList() {
         </div>
         <div className="flex gap-2">
           <button
+            onClick={() => router.push("/reports")}
+            className="rounded border border-zinc-300 px-4 py-2 text-sm"
+          >
+            Summary report
+          </button>
+          <button
             onClick={() => router.push("/documents/new")}
             className="rounded bg-zinc-900 px-4 py-2 text-sm text-white"
           >
