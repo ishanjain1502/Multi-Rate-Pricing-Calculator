@@ -4,7 +4,13 @@ A full-stack web app for creating documents with line items, applying per-line d
 
 ## Live deployment
 
-> **Not deployed yet.** Add the public URL here before submission.
+Deploy as **two Vercel projects** from this monorepo (free tier + MongoDB Atlas M0).
+
+| Vercel project | Root directory | URL role |
+|----------------|----------------|----------|
+| `crossval-api` | `server` | REST API (`/api/health`, `/api/documents`, …) |
+| `crossval-web` | `client` | Live app (submit this URL) |
+
 
 ## What’s implemented
 
@@ -43,7 +49,9 @@ crossVal/
 │   ├── app/                # App Router pages
 │   ├── components/         # Auth + document UI
 │   └── lib/                # API client, money helpers, lineCalc mirror
-├── server/                 # Express API (port 3001)
+├── server/                 # Express API (port 3001 / Vercel serverless)
+│   ├── api/index.ts        # Vercel serverless entry (wraps Express app)
+│   ├── vercel.json         # Vercel rewrites for API project
 │   ├── src/
 │   │   ├── calculations/   # Pure pricing logic (no HTTP/DB)
 │   │   ├── services/       # documentService, authService
@@ -126,6 +134,50 @@ Optional: set `NEXT_PUBLIC_API_URL` (defaults to `http://localhost:3001`).
 | `JWT_SECRET` | `dev-secret-change-me` | JWT signing key |
 | `JWT_EXPIRES_IN` | `15d` | Token lifetime |
 | `BCRYPT_ROUNDS` | `10` | Password hashing cost |
+
+## Deploy on Vercel
+
+Prerequisites: [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) M0 cluster (replica set) with `MONGO_URI`.
+
+### 1. API project (`server/`)
+
+1. [vercel.com](https://vercel.com) → **Add New** → **Project** → import this repo.
+2. **Root Directory:** `server`
+3. Framework preset: **Other** (uses `server/vercel.json`).
+4. **Environment variables:**
+
+   | Key | Value |
+   |-----|--------|
+   | `MONGO_URI` | Atlas connection string |
+   | `JWT_SECRET` | long random string |
+   | `NODE_ENV` | `production` |
+
+5. Deploy → verify `https://<api-project>.vercel.app/api/health`
+
+The API runs as a **serverless Express** handler (`api/index.ts` + `vercel.json` rewrites). Mongo connections are cached across warm invocations (`connectDB`).
+
+Local long-running mode is unchanged: `npm run dev` / `npm start` via `src/index.ts`.
+
+### 2. Web project (`client/`)
+
+1. **Add New** → **Project** → same repo.
+2. **Root Directory:** `client`
+3. Framework: **Next.js** (auto).
+4. **Environment variable:**
+
+   | Key | Value |
+   |-----|--------|
+   | `NEXT_PUBLIC_API_URL` | `https://<api-project>.vercel.app` |
+
+   No trailing slash. Set this **before** the production build (it is embedded at build time).
+
+5. Deploy → open the web URL → signup / login smoke test.
+
+### Notes
+
+- Two separate Vercel projects = two URLs; the browser calls the API directly (CORS is open).
+- Free tier: API may **cold-start** after idle (~10s function timeout on Hobby).
+- Do not set `PORT` on Vercel for the API project.
 
 ## Running tests
 
