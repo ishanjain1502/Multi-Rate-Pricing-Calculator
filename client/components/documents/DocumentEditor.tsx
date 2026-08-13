@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import * as api from "@/lib/api";
-import { formatMoney } from "@/lib/money";
+import { CURRENCIES, formatMoney } from "@/lib/money";
 import { calcLine } from "@/lib/lineCalc";
 import { ApiError, type DocumentDetail, type LineBody, type LineItem } from "@/lib/types";
 import { LineItemForm, lineToCalcInput, type EditableLine } from "./LineItemForm";
@@ -276,13 +276,20 @@ export function DocumentEditor(
         </label>
         <label className="block text-sm">
           Currency
-          <input
+          <select
             value={currency}
             onChange={(e) => setCurrency(e.target.value)}
-            maxLength={3}
-            className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 uppercase"
-            placeholder="usd"
-          />
+            className="mt-1 w-full rounded border border-zinc-300 px-3 py-2"
+          >
+            {CURRENCIES.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.code.toUpperCase()} — {c.label}
+              </option>
+            ))}
+            {!CURRENCIES.some((c) => c.code === currency) && (
+              <option value={currency}>{currency.toUpperCase()}</option>
+            )}
+          </select>
         </label>
       </section>
 

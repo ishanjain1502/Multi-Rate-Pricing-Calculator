@@ -1,6 +1,6 @@
 // client/lib/__tests__/money.test.ts
 import { describe, expect, it } from "vitest";
-import { dollarsToCents, formatMoney } from "../money";
+import { CURRENCIES, dollarsToCents, formatMoney } from "../money";
 
 describe("dollarsToCents", () => {
   it("converts whole dollars", () => {
@@ -30,6 +30,21 @@ describe("formatMoney", () => {
   });
   it("uppercases the currency code", () => {
     expect(formatMoney(10000, "eur")).toContain("100.00");
+  });
+  it("falls back to a plain amount for invalid currency codes instead of throwing", () => {
+    expect(formatMoney(42150, "us")).toBe("US 421.50");
+    expect(formatMoney(42150, "")).toBe("421.50");
+  });
+});
+
+describe("CURRENCIES", () => {
+  it("contains only valid 3-letter lowercase ISO codes", () => {
+    expect(CURRENCIES.length).toBeGreaterThan(0);
+    for (const c of CURRENCIES) {
+      expect(c.code).toMatch(/^[a-z]{3}$/);
+      expect(c.label.length).toBeGreaterThan(0);
+      expect(() => formatMoney(100, c.code)).not.toThrow();
+    }
   });
 });
 
