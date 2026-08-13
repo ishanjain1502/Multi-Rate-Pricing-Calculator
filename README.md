@@ -123,7 +123,15 @@ npm install
 npm run dev
 ```
 
-Optional: set `NEXT_PUBLIC_API_URL` (defaults to `http://localhost:3001`).
+Copy `client/.env.example` to `client/.env.local`. **`.env.local` overrides `.env`** in Next.js — if both exist with different values, `.env.local` wins.
+
+Restart the dev server after changing env files (`NEXT_PUBLIC_*` is inlined at build/start).
+
+### Environment variables (client)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:3001` | API origin (no trailing slash; `/api` is appended) |
 
 ### Environment variables (server)
 
